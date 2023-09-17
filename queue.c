@@ -2,27 +2,45 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <sys/mman.h>
+#include <mach/mach.h>
+#include <mach/mach_vm.h>
 
 void queue_init(Queue* queue, int capacity) {
-  int fd = shm_open("queue", O_RDWR | O_CREAT, 0777);
-  assert(fd != -1);
+  mach_vm_address_t address;
+  {
+    mach_port_t            task        = mach_task_self();
+    mach_vm_size_t         size        = capacity;
+    vm_address_t           mask        = 0;
+    int                    flags       = VM_FLAGS_ANYWHERE;
+    mem_entry_name_port_t  object      = MEMORY_OBJECT_NULL;
+    memory_object_offset_t offset      = 0;
+    boolean_t              copy        = FALSE;
+    vm_prot_t              protection  = VM_PROT_READ | VM_PROT_WRITE;
+    vm_inherit_t           inheritance = VM_INHERIT_SHARE;
+    kern_return_t          error       = mach_vm_map(
+      task, &address, size, mask, flags, object, offset, copy, protection, protection, inheritance
+    );
+    assert(error == KERN_SUCCESS);
+  }
 
-  assert(shm_unlink("queue") == 0);
-
-  assert(ftruncate(fd, capacity * 2) == 0);
-
-  int   prot   = PROT_READ | PROT_WRITE;
-  int   flags  = MAP_SHARED;
-  char* memory = mmap(NULL, capacity * 2, prot, flags, fd, 0);
-  assert(memory != MAP_FAILED);
-
-  assert(mmap(memory,            capacity, prot, flags | MAP_FIXED, fd, 0) != MAP_FAILED);
-  assert(mmap(&memory[capacity], capacity, prot, flags | MAP_FIXED, fd, 0) != MAP_FAILED);
+  {
+    mach_port_t       task        = mach_task_self();
+    mach_vm_address_t target      = address + capacity;
+    mach_vm_size_t    size        = capacity;
+    mach_vm_offset_t  mask        = 0;
+    boolean_t         anywhere    = FALSE;
+    mach_vm_address_t source      = address;
+    boolean_t         copy        = FALSE;
+    vm_prot_t         current;
+    vm_prot_t         max;
+    vm_inherit_t      inheritance = VM_INHERIT_SHARE;
+    kern_return_t     error       = mach_vm_remap(
+      task, &target, size, mask, anywhere, task, source, copy, &current, &max, inheritance
+    );
+    assert(error == KERN_SUCCESS);
+  }
   
-  queue->memory   = memory;
+  queue->memory   = (char*) address;
   queue->start    = 0;
   queue->end      = 0;
   queue->capacity = capacity;

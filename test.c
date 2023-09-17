@@ -3,10 +3,12 @@
 #include <assert.h>
 
 int main() {
+  int capacity = 1 << 20;
+  
   Queue* queue = malloc(sizeof(Queue));
-  queue_init(queue, 1 << 29);
+  queue_init(queue, capacity);
 
-  int  count   = 10000000;
+  int  count   = capacity / sizeof(int);
   int* numbers = malloc(sizeof(int) * count);
   for (int i = 0; i < count; i++)
     numbers[i] = rand();
