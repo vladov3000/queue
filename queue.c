@@ -1,9 +1,9 @@
 #include "queue.h"
-#include <stdlib.h>
 #include <string.h>
 #include <assert.h>
 #include <mach/mach.h>
 #include <mach/mach_vm.h>
+#include <immintrin.h>
 
 void queue_init(Queue* queue, int capacity) {
   mach_vm_address_t address;
@@ -46,8 +46,15 @@ void queue_init(Queue* queue, int capacity) {
   queue->capacity = capacity;
 }
 
-void* queue_front(Queue* queue) {
-  return &queue->memory[queue->start];
+static int queue_full(int start, int end, int needed, int capacity) {
+  return (end + needed) % capacity == start;
+}
+
+void queue_push_wait(Queue* queue, int size) {
+  int end = queue->end;
+  do {
+    _mm_pause();
+  } while(queue_full(__atomic_load_n(&queue->start, __ATOMIC_ACQUIRE), end, size, queue->capacity));
 }
 
 void* queue_back(Queue* queue) {
@@ -55,9 +62,25 @@ void* queue_back(Queue* queue) {
 }
 
 void queue_push(Queue* queue, int size) {
-  queue->end = (queue->end + size) % queue->capacity;
+  __atomic_store_n(&queue->end, (queue->end + size) % queue->capacity, __ATOMIC_RELEASE);
+}
+
+static int queue_empty(int start, int end, int needed, int capacity) {
+  int size = (end - start + capacity) % capacity;
+  return size < needed;
+}
+
+void queue_pop_wait(Queue* queue, int size) {
+  int start = queue->start;
+  do {
+    _mm_pause();
+  } while (queue_empty(start, __atomic_load_n(&queue->end, __ATOMIC_ACQUIRE), size, queue->capacity));
+}
+
+void* queue_front(Queue* queue) {
+  return &queue->memory[queue->start];
 }
 
 void queue_pop(Queue* queue, int size) {
-  queue->start = (queue->start + size) % queue->capacity;
+  __atomic_store_n(&queue->start, (queue->start + size) % queue->capacity, __ATOMIC_RELEASE);
 }
